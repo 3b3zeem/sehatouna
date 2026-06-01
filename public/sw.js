@@ -1,7 +1,7 @@
 // Standalone Service Worker for Meal Reminders
 
 // Import Dexie via CDN so it matches the DB used by the Next.js app
-importScripts('https://unpkg.com/dexie@latest/dist/dexie.js');
+importScripts('https://unpkg.com/dexie@4.4.3/dist/dexie.js');
 
 const db = new Dexie('FamilyHealthDB');
 db.version(1).stores({
