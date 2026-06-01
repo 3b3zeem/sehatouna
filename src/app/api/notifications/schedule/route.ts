@@ -36,7 +36,8 @@ export async function POST(request: Request) {
           headings: schedule.headings,
           contents: schedule.contents,
           data: schedule.data,
-          send_after: schedule.send_after, // e.g., "2026-06-01 14:00:00 GMT+0300"
+          send_after: schedule.send_after,
+          ...(schedule.web_buttons && { web_buttons: schedule.web_buttons }),
         })
       });
 

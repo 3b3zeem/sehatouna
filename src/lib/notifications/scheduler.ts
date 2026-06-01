@@ -1,5 +1,42 @@
 import { Medication } from '@/lib/db/dexie';
 
+// Default meal times (can be made configurable later)
+const MEAL_TIMES: Record<string, string> = {
+  breakfast: '07:30',
+  lunch: '13:00',
+  dinner: '19:30'
+};
+
+const BEFORE_MEAL_OFFSET_MIN = 15;
+
+function getMealNameAr(mealType: string): string {
+  const names: Record<string, string> = { breakfast: 'الفطار', lunch: 'الغداء', dinner: 'العشاء' };
+  return names[mealType] ?? mealType;
+}
+
+function getMealNameEn(mealType: string): string {
+  const names: Record<string, string> = { breakfast: 'breakfast', lunch: 'lunch', dinner: 'dinner' };
+  return names[mealType] ?? mealType;
+}
+
+function getMealScheduleTimes(mealType: string, mealRelation: 'before' | 'after', maxDays: number = 3): Date[] {
+  const mealTimeStr = MEAL_TIMES[mealType];
+  if (!mealTimeStr) return [];
+  const [h, m] = mealTimeStr.split(':').map(Number);
+  const times: Date[] = [];
+  const now = new Date();
+  for (let i = 0; i < maxDays; i++) {
+    const mealDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, h, m, 0, 0);
+    const scheduleDate = mealRelation === 'before'
+      ? new Date(mealDate.getTime() - BEFORE_MEAL_OFFSET_MIN * 60000)
+      : mealDate;
+    if (scheduleDate.getTime() - now.getTime() > 60000) {
+      times.push(scheduleDate);
+    }
+  }
+  return times;
+}
+
 declare global {
   interface TimestampTrigger {
     timestamp: number;
@@ -68,30 +105,71 @@ function getOneSignalDateString(date: Date): string {
 }
 
 export async function scheduleMedicationNotifications(medications: Medication[], userId: string) {
-  const schedules = [];
+  const schedules: object[] = [];
 
+  // Fixed-time & interval-hours medications
   for (const med of medications) {
     if (!med.isActive || med.timingType === 'meal') continue;
-
-    // Schedule next 5 doses to OneSignal (to avoid spamming API but keep enough buffer)
-    const nextTimes = calculateNextDoseTimes(med, 5); 
-
+    const nextTimes = calculateNextDoseTimes(med, 5);
     for (const time of nextTimes) {
-      const timeMs = time.getTime();
-      const delayMs = timeMs - Date.now();
-
-      // Only schedule if it's in the future (at least 1 min to allow processing)
-      if (delayMs <= 60000) continue;
-
+      if (time.getTime() - Date.now() <= 60000) continue;
       schedules.push({
-        headings: { en: "صِحتنا | Medication Time", ar: "صِحتنا | وقت الدواء" },
-        contents: { 
-          en: `It's time to take: ${med.name} (${med.dosage} ${med.dosageUnit})`, 
-          ar: `حان وقت تناول الدواء: ${med.name} (${med.dosage} ${med.dosageUnit})` 
+        headings: { en: 'صِحتنا | Medication Time', ar: 'صِحتنا | وقت الدواء' },
+        contents: {
+          en: `It's time to take: ${med.name} (${med.dosage} ${med.dosageUnit})`,
+          ar: `حان وقت تناول الدواء: ${med.name} (${med.dosage} ${med.dosageUnit})`
         },
         data: { medId: med.id, action: 'medication_reminder' },
         send_after: getOneSignalDateString(time)
       });
+    }
+  }
+
+  // Meal-type medications — group by mealType+mealRelation (one notification per group)
+  const mealMeds = medications.filter(
+    m => m.isActive && m.timingType === 'meal' && m.mealType && m.mealRelation
+  );
+  const mealGroups = new Map<string, Medication[]>();
+  for (const med of mealMeds) {
+    const key = `${med.mealType}_${med.mealRelation}`;
+    if (!mealGroups.has(key)) mealGroups.set(key, []);
+    mealGroups.get(key)!.push(med);
+  }
+  for (const [key, meds] of mealGroups) {
+    const sepIdx = key.lastIndexOf('_');
+    const mealType = key.substring(0, sepIdx);
+    const mealRelation = key.substring(sepIdx + 1) as 'before' | 'after';
+    const times = getMealScheduleTimes(mealType, mealRelation);
+    for (const time of times) {
+      if (mealRelation === 'before') {
+        const medNames = meds.map(m => `${m.name} (${m.dosage} ${m.dosageUnit})`).join(', ');
+        schedules.push({
+          headings: { en: 'صِحتنا | Before-Meal Medication', ar: 'صِحتنا | دواء قبل الوجبة' },
+          contents: {
+            en: `Take before ${getMealNameEn(mealType)}: ${medNames}`,
+            ar: `تناول قبل ${getMealNameAr(mealType)}: ${medNames}`
+          },
+          data: { mealType, action: 'medication_reminder' },
+          send_after: getOneSignalDateString(time)
+        });
+      } else {
+        schedules.push({
+          headings: {
+            en: `صِحتنا | Did you eat ${getMealNameEn(mealType)}?`,
+            ar: `صِحتنا | هل تناولت ${getMealNameAr(mealType)}؟`
+          },
+          contents: {
+            en: `You have medication to take after ${getMealNameEn(mealType)}.`,
+            ar: `لديك دواء يجب تناوله بعد ${getMealNameAr(mealType)}.`
+          },
+          data: { mealType, action: 'meal_check' },
+          web_buttons: [
+            { id: 'yes_ate', text: 'نعم، أكلت ✅' },
+            { id: 'not_yet', text: 'لم آكل بعد ⏳' }
+          ],
+          send_after: getOneSignalDateString(time)
+        });
+      }
     }
   }
 
