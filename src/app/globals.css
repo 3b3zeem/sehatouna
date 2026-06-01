@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
 }
 
 @theme inline {
@@ -10,12 +10,19 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  
+  --animate-subtle-bounce: subtle-bounce 2s infinite ease-in-out;
+  @keyframes subtle-bounce {
+    0%, 100% { transform: translateY(-2%); }
+    50% { transform: translateY(0); }
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Enforce light theme for the medical look */
+    --background: #f0f7f9;
+    --foreground: #0f172a;
   }
 }
 
